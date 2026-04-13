@@ -24,6 +24,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { isAllowed, isAdmin, isOpenGroup, isGroupAllowed, trackMessage, checkGroupCooldown } from "./guards.js";
 import { getOrCreateSession, promptStreaming, resetGroupSession, sharedAuthStorage } from "./agent.js";
 import { upsertContact, getContactLabel } from "./contacts.js";
+import { cdmxDateString, cdmxDateStringOffset } from "./time.js";
 
 const logger = pino({ level: "silent" }); // Baileys is VERY noisy
 
@@ -99,7 +100,7 @@ async function processImage(msg: any): Promise<{ filename: string; description: 
       .toBuffer();
 
     // Save to disk
-    const date = new Date().toISOString().slice(0, 10);
+    const date = cdmxDateString();
     const msgId = msg.key.id ?? Date.now().toString();
     const filename = `${date}_${msgId}.jpg`;
     const filepath = join(IMAGES_DIR, filename);
@@ -229,11 +230,11 @@ async function enrichLinks(text: string): Promise<string> {
 function getRecentMessages(jid: string): string {
   try {
     const groupName = GROUP_NAMES[jid] ?? jid.replace(/[^a-zA-Z0-9]/g, "_");
-    const today = new Date().toISOString().slice(0, 10);
+    const today = cdmxDateString();
     const file = join(MESSAGES_DIR, `${today}_${groupName}.jsonl`);
 
     // Also check old format and yesterday
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const yesterday = cdmxDateStringOffset(-1);
     const files = [
       join(MESSAGES_DIR, `${yesterday}_${groupName}.jsonl`),
       join(MESSAGES_DIR, `${yesterday}.jsonl`),
@@ -260,7 +261,7 @@ function getRecentMessages(jid: string): string {
     if (recent.length === 0) return "";
 
     return recent.map(m => {
-      const time = new Date(m.ts).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+      const time = new Date(m.ts).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", timeZone: "America/Mexico_City" });
       return `[${time}] ${getContactLabel(m.sender)}: ${m.text}`;
     }).join("\n");
   } catch (err) {
@@ -275,7 +276,7 @@ function getRecentMessages(jid: string): string {
 function getAllTodayMessages(jid: string): string {
   try {
     const groupName = GROUP_NAMES[jid] ?? jid.replace(/[^a-zA-Z0-9]/g, "_");
-    const today = new Date().toISOString().slice(0, 10);
+    const today = cdmxDateString();
     const files = [
       join(MESSAGES_DIR, `${today}.jsonl`),
       join(MESSAGES_DIR, `${today}_${groupName}.jsonl`),
@@ -297,7 +298,7 @@ function getAllTodayMessages(jid: string): string {
     if (allMessages.length === 0) return "";
 
     return allMessages.map(m => {
-      const time = new Date(m.ts).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+      const time = new Date(m.ts).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", timeZone: "America/Mexico_City" });
       return `[${time}] ${getContactLabel(m.sender)}: ${m.text}`;
     }).join("\n");
   } catch (err) {
@@ -312,7 +313,7 @@ function getAllTodayMessages(jid: string): string {
 function logMessage(jid: string, senderId: string, text: string, timestamp: number): void {
   try {
     if (!existsSync(MESSAGES_DIR)) mkdirSync(MESSAGES_DIR, { recursive: true });
-    const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
+    const date = cdmxDateString(new Date(timestamp * 1000));
     const groupName = GROUP_NAMES[jid] ?? jid.replace(/[^a-zA-Z0-9]/g, "_");
     const file = join(MESSAGES_DIR, `${date}_${groupName}.jsonl`);
     const entry = JSON.stringify({

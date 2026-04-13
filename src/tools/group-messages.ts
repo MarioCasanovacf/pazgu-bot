@@ -7,10 +7,11 @@
 
 import { defineTool } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-
-type Details = Record<string, unknown>;
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
+import { cdmxDateString, cdmxDateStringOffset } from "../time.js";
+
+type Details = Record<string, unknown>;
 
 const MESSAGES_DIR = process.env.MESSAGES_DIR ?? "/data/messages";
 
@@ -27,15 +28,8 @@ function loadGroupNames(): Record<string, string> {
 }
 
 function resolveDate(input: string | undefined): string {
-  const today = new Date();
-  if (!input || input === "today" || input === "hoy") {
-    return today.toISOString().slice(0, 10);
-  }
-  if (input === "yesterday" || input === "ayer") {
-    const d = new Date(today);
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().slice(0, 10);
-  }
+  if (!input || input === "today" || input === "hoy") return cdmxDateString();
+  if (input === "yesterday" || input === "ayer") return cdmxDateStringOffset(-1);
   if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
   throw new Error(`Invalid date "${input}". Use YYYY-MM-DD, "today", or "yesterday".`);
 }
@@ -65,7 +59,7 @@ function readJsonl(file: string): LoggedMessage[] {
 function formatMessages(msgs: LoggedMessage[]): string {
   return msgs
     .map((m) => {
-      const time = new Date(m.ts).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+      const time = new Date(m.ts).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", timeZone: "America/Mexico_City" });
       const sender = m.sender.split("@")[0].slice(-6);
       return `[${time}] ${sender}: ${m.text}`;
     })
