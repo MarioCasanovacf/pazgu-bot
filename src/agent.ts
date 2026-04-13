@@ -14,6 +14,9 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
+import { groupMessagesTool } from "./tools/group-messages.js";
+
+const TEST_DM_JIDS = new Set((process.env.TEST_DM_JIDS ?? "").split(",").filter(Boolean));
 
 const agentDir = (process.env.PI_AGENT_DIR ?? "/data/agent").replace("~", process.env.HOME ?? "/root");
 const cwd = process.env.PI_CWD ?? "/data";
@@ -89,6 +92,8 @@ export async function getOrCreateSession(groupJid: string): Promise<AgentSession
     settingsManager,
     // SECURITY: No filesystem tools. Only web_search and firecrawl_scrape (from extensions/env).
     tools: [],
+    // Admin-only tools: available solely in DM sessions listed in TEST_DM_JIDS.
+    customTools: TEST_DM_JIDS.has(groupJid) ? [groupMessagesTool] : [],
   });
 
   sessions.set(groupJid, session);
