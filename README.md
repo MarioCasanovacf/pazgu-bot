@@ -6,8 +6,9 @@ WhatsApp bot for the AI Builders MX community. Powered by [Baileys](https://gith
 
 - **Community assistant** — Answers questions about AI, dev tools, LLMs, agents, and building products
 - **Group context awareness** — Reads recent group messages to understand ongoing conversations
-- **Daily summaries** — Admins can request recaps of the day's discussions via the `get_group_messages` tool
+- **Daily summaries** — Admins can request recaps of the day's discussions via the `get_group_messages` tool. Senders are rendered as `FirstName (…1234)` using the contact store built from WhatsApp `pushName`
 - **Message logging** — Stores all group messages in daily `.jsonl` files for analysis
+- **Contact store** — Persists phone → first name mapping at `CONTACTS_FILE` so recaps attribute messages by name
 - **Link enrichment** — Uses Firecrawl + Haiku to summarize shared links in context
 
 ## Architecture
@@ -48,6 +49,7 @@ WhatsApp ← Baileys → Message Handler → Anthropic Messages API → Response
 | `AGENTS_MD_PATH` | System prompt path (default: `/data/agent/AGENTS.md`) |
 | `MESSAGES_DIR` | Message logs dir (default: `/data/messages`) |
 | `IMAGES_DIR` | Downloaded image dir (default: `/data/images`) |
+| `CONTACTS_FILE` | Contact store JSON path (default: `/data/contacts.json`) |
 | `API_KEY` | API key for messages endpoint |
 | `BAILEYS_AUTH_B64` | Base64 Baileys auth (for first deploy) |
 | `FIRECRAWL_API_KEY` | Firecrawl API key (link enrichment) |
