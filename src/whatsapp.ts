@@ -150,7 +150,7 @@ async function processPdf(msg: any): Promise<{ filename: string; summary: string
           role: "user",
           content: [
             { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
-            { type: "text", text: "Resume este PDF en 2-3 oraciones cortas en español. Enfócate en: qué es, de qué trata y un dato clave o conclusión. Solo el resumen, nada más." },
+            { type: "text", text: "Este PDF se compartió en un grupo de WhatsApp de builders de AI en LATAM. En 2-3 oraciones cortas en español, di qué le puede interesar a la comunidad: qué es, para quién aplica, y si hay algo accionable (tool, paper, recurso, convocatoria). Directo, útil, sin relleno editorial." },
           ],
         }],
       });
@@ -504,15 +504,15 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
   // Send "thinking" indicator
   await sock?.sendPresenceUpdate("composing", jid);
 
-  // Inject group conversation as context
-  // For summary/analysis requests from admins, load full day; otherwise last 50
+  // Inject recent messages as context for casual queries only.
+  // For admin summary/analysis commands, skip the prefix — the agent has the
+  // get_group_messages tool and will load the day itself. Keeping both caused
+  // the full transcript to travel twice to the model (once in prefix, once in
+  // tool_result) for every recap.
   const isFullContext = isAdminQuery && isAdmin(userId);
-  const recentChat = isFullContext ? getAllTodayMessages(jid) : getRecentMessages(jid);
-  const contextLabel = isFullContext
-    ? "TODOS los mensajes del día en el grupo"
-    : "últimos mensajes de la conversación";
+  const recentChat = isFullContext ? "" : getRecentMessages(jid);
   const contextPrefix = recentChat
-    ? `[CONTEXTO DEL GRUPO — ${contextLabel}, NO los menciones explícitamente, solo úsalos para entender de qué se habla]\n${recentChat}\n\n[PREGUNTA DEL USUARIO]\n`
+    ? `[CONTEXTO DEL GRUPO — últimos mensajes de la conversación, NO los menciones explícitamente, solo úsalos para entender de qué se habla]\n${recentChat}\n\n[PREGUNTA DEL USUARIO]\n`
     : "";
   const senderLabel = getContactLabel(senderId);
   const fullQuery = `[REMITENTE: ${senderLabel}]\n${contextPrefix}${query}`;

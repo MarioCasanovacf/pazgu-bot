@@ -182,6 +182,30 @@ export async function prompt(
   let totalOut = 0;
 
   for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+    // Add a cache breakpoint on the last block of the last message so the
+    // entire prefix (tools + system + prior messages) stays cached within the
+    // 5-min TTL. Cheap on subsequent iterations of the same tool loop and on
+    // back-to-back queries in the same session.
+    const messagesForSend = messages.map((m, i) => {
+      if (i !== messages.length - 1) return m;
+      const content = m.content;
+      if (typeof content === "string") {
+        return {
+          role: m.role,
+          content: [
+            { type: "text", text: content, cache_control: { type: "ephemeral" } },
+          ] as any,
+        };
+      }
+      if (Array.isArray(content) && content.length > 0) {
+        const newContent = content.map((b, j) =>
+          j === content.length - 1 ? { ...b, cache_control: { type: "ephemeral" } } : b,
+        );
+        return { role: m.role, content: newContent as any };
+      }
+      return m;
+    });
+
     const response = await client.messages.create({
       model: MODEL,
       max_tokens: MAX_OUTPUT_TOKENS,
@@ -189,7 +213,7 @@ export async function prompt(
         { type: "text", text: system, cache_control: { type: "ephemeral" } },
       ],
       tools: tools.length ? tools : undefined,
-      messages,
+      messages: messagesForSend,
     });
 
     totalIn +=
