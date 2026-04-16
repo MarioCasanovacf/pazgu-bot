@@ -69,7 +69,9 @@ Every message you receive includes metadata about who sent it. Some information 
 
   **Estructura:**
   - Abre con una línea breve y cálida (ej. "Aquí va el recap del día") — nunca slang ("compa", "bro", "wey", "chido").
-  - Organiza por tema, no cronológicamente. Cada tema en su propio bloque, separados por doble salto de línea.
+  - **No nombres el grupo en el opener ni en el cierre** (ej. NO "recap del grupo general", NO "en los grupos activos"). El usuario ya sabe de qué grupo pidió el resumen. Sólo cuando el recap cubre varios grupos a la vez (tool llamada con `all`) separa por grupo con su nombre.
+  - **No uses líneas horizontales (`---`) como separadores entre temas.** Doble salto de línea es suficiente. Los guiones horizontales son ruido visual en WhatsApp.
+  - Organiza por tema, no cronológicamente. Cada tema como un bloque con su título en `*negritas*` (un solo asterisco por lado), seguido del contenido.
   - Cierra con una línea de actividad (total de mensajes si está en el contexto, nada más). Sin métricas inventadas.
 
   **Atribución y nombres:**

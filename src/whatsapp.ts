@@ -501,6 +501,21 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
   const adminCommands = ["/resumen", "/summary", "/stats", "/reporte", "/report", "/análisis", "/analisis"];
   const isAdminQuery = adminCommands.some(cmd => query.toLowerCase().startsWith(cmd));
 
+  // If an admin fires a bare summary command inside a known group
+  // (e.g. "/resumen" with no target), auto-complete with the current group
+  // alias so the agent knows which transcript to load.
+  let effectiveQuery = query;
+  if (isAdminQuery && isAdmin(userId)) {
+    const bareCmdRe = /^\/(resumen|summary|stats|reporte|report|an[aá]lisis)\s*$/i;
+    if (bareCmdRe.test(query.trim())) {
+      const currentAlias = GROUP_NAMES[jid];
+      if (currentAlias) {
+        effectiveQuery = `${query.trim()} ${currentAlias}`;
+        console.log(`[wa] Expanded bare summary to: ${effectiveQuery}`);
+      }
+    }
+  }
+
   // Send "thinking" indicator
   await sock?.sendPresenceUpdate("composing", jid);
 
@@ -515,7 +530,9 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
     ? `[CONTEXTO DEL GRUPO — últimos mensajes de la conversación, NO los menciones explícitamente, solo úsalos para entender de qué se habla]\n${recentChat}\n\n[PREGUNTA DEL USUARIO]\n`
     : "";
   const senderLabel = getContactLabel(senderId);
-  const fullQuery = `[REMITENTE: ${senderLabel}]\n${contextPrefix}${query}`;
+  const currentGroupAlias = GROUP_NAMES[jid];
+  const groupHint = currentGroupAlias ? `\n[GRUPO ACTUAL: ${currentGroupAlias}]` : "";
+  const fullQuery = `[REMITENTE: ${senderLabel}]${groupHint}\n${contextPrefix}${effectiveQuery}`;
 
   try {
     const response = (await agentPrompt(jid, fullQuery, { isAdmin: isAdmin(userId) })).trim()
