@@ -1,31 +1,32 @@
 # Aiby 👁️ — AI Builders MX Community Bot
 
-WhatsApp bot for the AI Builders MX community. Powered by [Baileys](https://github.com/WhiskeySockets/Baileys) + [Pi SDK](https://github.com/mariozechner/pi-coding-agent).
+WhatsApp bot for the AI Builders MX community. Powered by [Baileys](https://github.com/WhiskeySockets/Baileys) + [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript).
 
 ## What it does
 
 - **Community assistant** — Answers questions about AI, dev tools, LLMs, agents, and building products
 - **Group context awareness** — Reads recent group messages to understand ongoing conversations
-- **Daily summaries** — Admins can request recaps of the day's discussions
+- **Daily summaries** — Admins can request recaps of the day's discussions via the `get_group_messages` tool
 - **Message logging** — Stores all group messages in daily `.jsonl` files for analysis
-- **Web search & scraping** — Uses Brave Search and Firecrawl silently to give better answers
+- **Link enrichment** — Uses Firecrawl + Haiku to summarize shared links in context
 
 ## Architecture
 
 ```
-WhatsApp ← Baileys → Message Handler → Pi SDK Agent → Response
+WhatsApp ← Baileys → Message Handler → Anthropic Messages API → Response (non-streaming)
                           ↓
                     .jsonl logging
 ```
 
 - **Baileys** — WhatsApp Web multi-device connection
-- **Pi SDK** — Agent sessions with Claude, one per group
+- **Anthropic SDK** — Direct calls to the Messages API; one JSONL session per JID on the volume
+- **Tools** — `get_group_messages` (admin-only, for summaries). No streaming; final parsed reply is sent as one WhatsApp message
 - **Express** — Health check + messages API
 - **Railway** — Deployment with persistent volume at `/data`
 
 ## Security
 
-- **No filesystem tools** — `bash`, `read`, `write`, `edit` are disabled at SDK level (`tools: []`)
+- **Minimal tool surface** — Only `get_group_messages` (admin-only). No filesystem, shell, or network tools
 - **Hardened system prompt** — Anti-injection rules in AGENTS.md
 - **Role-based access** — `ADMIN_USERS` for summaries/analysis, `ALLOWED_USERS` for general access
 - **Group allowlist** — Only responds in `ALLOWED_GROUPS`
@@ -36,21 +37,20 @@ WhatsApp ← Baileys → Message Handler → Pi SDK Agent → Response
 
 | Variable | Description |
 |----------|-------------|
+| `ANTHROPIC_API_KEY` | **Required.** Anthropic API key (billed to your API account) |
 | `BOT_PREFIX` | Trigger word (default: `aiby`) |
 | `BOT_ALIASES` | Comma-separated aliases |
 | `ALLOWED_GROUPS` | Comma-separated group JIDs |
 | `ALLOWED_USERS` | Comma-separated user IDs (empty = all) |
 | `ADMIN_USERS` | Comma-separated admin IDs (for summaries) |
 | `BAILEYS_AUTH_DIR` | Path to Baileys session (default: `/data/baileys-auth`) |
-| `PI_AGENT_DIR` | Path to agent config (default: `/data/agent`) |
-| `PI_CWD` | Working directory (default: `/data`) |
-| `PI_SESSIONS_DIR` | Agent sessions dir (default: `/data/sessions`) |
+| `SESSIONS_DIR` | Chat JSONL sessions dir (default: `/data/sessions`) |
+| `AGENTS_MD_PATH` | System prompt path (default: `/data/agent/AGENTS.md`) |
 | `MESSAGES_DIR` | Message logs dir (default: `/data/messages`) |
+| `IMAGES_DIR` | Downloaded image dir (default: `/data/images`) |
 | `API_KEY` | API key for messages endpoint |
-| `BOT_AUTH_JSON` | Pi SDK auth.json contents (for first deploy) |
 | `BAILEYS_AUTH_B64` | Base64 Baileys auth (for first deploy) |
-| `BRAVE_API_KEY` | Brave Search API key |
-| `FIRECRAWL_API_KEY` | Firecrawl API key |
+| `FIRECRAWL_API_KEY` | Firecrawl API key (link enrichment) |
 | `PORT` | HTTP server port (default: `3000`) |
 | `RATE_LIMIT_MAX` | Max messages per window (default: `10`) |
 | `RATE_LIMIT_WINDOW_MS` | Rate limit window in ms (default: `3600000`) |

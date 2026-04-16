@@ -22,7 +22,7 @@ import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import sharp from "sharp";
 import Anthropic from "@anthropic-ai/sdk";
 import { isAllowed, isAdmin, isOpenGroup, isGroupAllowed, trackMessage, checkGroupCooldown } from "./guards.js";
-import { getOrCreateSession, promptStreaming, resetGroupSession, sharedAuthStorage } from "./agent.js";
+import { prompt as agentPrompt } from "./agent.js";
 import { upsertContact, getContactLabel } from "./contacts.js";
 import { cdmxDateString, cdmxDateStringOffset } from "./time.js";
 
@@ -56,29 +56,13 @@ const IMAGE_MAX_SIZE = 512;
 const IMAGE_QUALITY = 60;
 const IMAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-// Reuse Pi SDK's shared auth for Anthropic API calls (handles OAuth refresh)
 let _anthropic: Anthropic | null = null;
-let _lastKey: string | undefined = undefined;
 
-async function getAnthropic(): Promise<Anthropic> {
-  const key = await sharedAuthStorage.getApiKey("anthropic") ?? "";
-  if (!key) throw new Error("No Anthropic API key available");
-  if (!_anthropic || key !== _lastKey) {
-    // OAuth tokens (sk-ant-oat*) need Bearer auth, not x-api-key
-    const isOAuth = key.startsWith("sk-ant-oat");
-    _anthropic = isOAuth
-      ? new Anthropic({
-          authToken: key,
-          defaultHeaders: {
-            "anthropic-version": "2023-06-01",
-            "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05",
-            "anthropic-client-info": "claude-cli/2.1.80 (external, cli)",
-            "user-agent": "claude-cli/2.1.80 (external, cli)",
-          },
-        })
-      : new Anthropic({ apiKey: key });
-    _lastKey = key;
-  }
+function getAnthropic(): Anthropic {
+  if (_anthropic) return _anthropic;
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error("Missing ANTHROPIC_API_KEY");
+  _anthropic = new Anthropic({ apiKey: key });
   return _anthropic;
 }
 
@@ -111,7 +95,7 @@ async function processImage(msg: any): Promise<{ filename: string; description: 
     const b64 = compressed.toString("base64");
     let description = "(imagen)";
     try {
-      const client = await getAnthropic();
+      const client = getAnthropic();
       const response = await client.messages.create({
         model: "claude-haiku-4-5",
         max_tokens: 200,
@@ -201,7 +185,7 @@ async function enrichLinks(text: string): Promise<string> {
       const truncated = markdown.slice(0, 2000);
 
       // Summarize with Haiku
-      const client = await getAnthropic();
+      const client = getAnthropic();
       const response = await client.messages.create({
         model: "claude-haiku-4-5",
         max_tokens: 150,
@@ -452,39 +436,12 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
   const fullQuery = `[REMITENTE: ${senderLabel}]\n${contextPrefix}${query}`;
 
   try {
-    const session = await getOrCreateSession(jid);
-    let fullResponse = "";
-
-    await promptStreaming(session, fullQuery, {
-      onDelta(chunk) {
-        fullResponse += chunk;
-      },
-      onToolStart(toolName) {
-        console.log(`[wa] Tool: ${toolName}`);
-      },
-    });
-
-    const response = fullResponse.trim() || "👁️ (sin respuesta)";
+    const response = (await agentPrompt(jid, fullQuery, { isAdmin: isAdmin(userId) })).trim()
+      || "👁️ (sin respuesta)";
     await sendReply(jid, response, rawMsg);
     await sock?.sendPresenceUpdate("available", jid);
   } catch (error) {
     console.error(`[wa] Error handling message:`, error);
-    const errMsg = String(error);
-
-    // Auto-retry on stuck agent
-    if (errMsg.includes("Agent is already processing")) {
-      await resetGroupSession(jid);
-      try {
-        const fresh = await getOrCreateSession(jid);
-        let fullResponse = "";
-        await promptStreaming(fresh, query, {
-          onDelta(chunk) { fullResponse += chunk; },
-        });
-        await sendReply(jid, fullResponse.trim() || "👁️ (sin respuesta)", rawMsg);
-        return;
-      } catch {}
-    }
-
     await sendReply(jid, "👁️ Algo falló. Intenta de nuevo.", rawMsg);
     await sock?.sendPresenceUpdate("available", jid);
   }
@@ -617,13 +574,11 @@ export async function connectWhatsApp(): Promise<WASocket> {
         console.log(`[wa] DM from ${jid}`);
         await sock?.sendPresenceUpdate("composing", jid);
         try {
-          const session = await getOrCreateSession(jid);
-          let fullResponse = "";
           const dmQuery = `[REMITENTE: ${getContactLabel(jid)}]\n${text}`;
-          await promptStreaming(session, dmQuery, {
-            onDelta(chunk) { fullResponse += chunk; },
-          });
-          await sendReply(jid, fullResponse.trim() || "👁️ (sin respuesta)", msg);
+          const userNum = jid.split("@")[0];
+          const response = (await agentPrompt(jid, dmQuery, { isAdmin: isAdmin(userNum) })).trim()
+            || "👁️ (sin respuesta)";
+          await sendReply(jid, response, msg);
         } catch (err) {
           console.error("[wa] DM error:", err);
           await sendReply(jid, "👁️ Algo falló.", msg);
