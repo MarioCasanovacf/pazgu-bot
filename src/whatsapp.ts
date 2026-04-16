@@ -287,9 +287,33 @@ function getAllTodayMessages(jid: string): string {
 }
 
 /**
- * Log a group message to a daily .jsonl file, separated by group.
+ * Log a reaction to `{date}_{group}_reactions.jsonl`.
+ * Empty `emoji` means the reactor removed their reaction.
+ * Reactions are joined to messages by `targetId` at read time.
  */
-function logMessage(jid: string, senderId: string, text: string, timestamp: number): void {
+function logReaction(jid: string, targetId: string, reactor: string, emoji: string, timestamp: number): void {
+  try {
+    if (!existsSync(MESSAGES_DIR)) mkdirSync(MESSAGES_DIR, { recursive: true });
+    const date = cdmxDateString(new Date(timestamp * 1000));
+    const groupName = GROUP_NAMES[jid] ?? jid.replace(/[^a-zA-Z0-9]/g, "_");
+    const file = join(MESSAGES_DIR, `${date}_${groupName}_reactions.jsonl`);
+    const entry = JSON.stringify({
+      ts: new Date(timestamp * 1000).toISOString(),
+      targetId,
+      reactor,
+      emoji,
+    });
+    appendFileSync(file, entry + "\n");
+  } catch (err) {
+    console.error("[log] Failed to log reaction:", err);
+  }
+}
+
+/**
+ * Log a group message to a daily .jsonl file, separated by group.
+ * `id` is the WhatsApp message id, needed to join reactions at read time.
+ */
+function logMessage(jid: string, id: string | null | undefined, senderId: string, text: string, timestamp: number): void {
   try {
     if (!existsSync(MESSAGES_DIR)) mkdirSync(MESSAGES_DIR, { recursive: true });
     const date = cdmxDateString(new Date(timestamp * 1000));
@@ -297,6 +321,7 @@ function logMessage(jid: string, senderId: string, text: string, timestamp: numb
     const file = join(MESSAGES_DIR, `${date}_${groupName}.jsonl`);
     const entry = JSON.stringify({
       ts: new Date(timestamp * 1000).toISOString(),
+      id: id ?? undefined,
       sender: senderId,
       text,
     });
@@ -517,6 +542,20 @@ export async function connectWhatsApp(): Promise<WASocket> {
       const testDmJids = (process.env.TEST_DM_JIDS ?? "").split(",").filter(Boolean);
       if (!isJidGroup(jid) && !testDmJids.includes(jid)) continue;
 
+      // Reactions arrive as regular messages with a reactionMessage payload.
+      // Capture and log before anything else — they have no text/image.
+      const reaction = msg.message?.reactionMessage;
+      if (reaction && isJidGroup(jid)) {
+        const targetId = reaction.key?.id;
+        const reactor = msg.key.participant ?? "";
+        if (targetId && reactor) {
+          const emoji = reaction.text ?? "";
+          const ts = msg.messageTimestamp as number ?? Math.floor(Date.now() / 1000);
+          logReaction(jid, targetId, reactor, emoji, ts);
+        }
+        continue;
+      }
+
       const text = extractText(msg.message);
       const hasImage = !!msg.message?.imageMessage;
 
@@ -530,6 +569,7 @@ export async function connectWhatsApp(): Promise<WASocket> {
       // Log all group messages for analysis
       if (isJidGroup(jid)) {
         const sender = msg.key.participant ?? "";
+        const msgId = msg.key.id ?? null;
         const ts = msg.messageTimestamp as number ?? Math.floor(Date.now() / 1000);
 
         if (hasImage) {
@@ -539,21 +579,21 @@ export async function connectWhatsApp(): Promise<WASocket> {
             const imgText = result
               ? `[📷 ${result.description}]${caption ? " " + caption : ""}`
               : `[📷 imagen]${caption ? " " + caption : ""}`;
-            logMessage(jid, sender, imgText, ts);
+            logMessage(jid, msgId, sender, imgText, ts);
           }).catch(() => {
-            logMessage(jid, sender, `[📷 imagen]${text ? " " + text : ""}`, ts);
+            logMessage(jid, msgId, sender, `[📷 imagen]${text ? " " + text : ""}`, ts);
           });
         } else if (text) {
           // Enrich links in background
           if (URL_REGEX.test(text)) {
             URL_REGEX.lastIndex = 0; // reset regex state
             enrichLinks(text).then((enriched) => {
-              logMessage(jid, sender, enriched, ts);
+              logMessage(jid, msgId, sender, enriched, ts);
             }).catch(() => {
-              logMessage(jid, sender, text, ts);
+              logMessage(jid, msgId, sender, text, ts);
             });
           } else {
-            logMessage(jid, sender, text, ts);
+            logMessage(jid, msgId, sender, text, ts);
           }
         }
       }
