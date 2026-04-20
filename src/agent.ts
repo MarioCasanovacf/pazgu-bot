@@ -17,17 +17,19 @@ export const MODELS = {
 
 export type ModelKey = keyof typeof MODELS;
 
-// Default for reporting/logging only. The actual model used is chosen per call.
-export const MODEL: string = MODELS.sonnet;
+// The conversational agent always runs on Haiku 4.5, admin or not. Sonnet
+// 4.6 is reserved exclusively for /podcast (src/podcast.ts) — the one
+// premium feature where the depth-of-reasoning cost is worth paying for.
+// Everything else (casual chat, /resumen tool loops, natural-language admin
+// queries) runs on Haiku, which is ~5x cheaper per token and plenty sharp
+// for Pazgu's 1-2 line replies and day-long transcript recaps.
+export const MODEL: string = MODELS.haiku;
 
 const CONTEXT_TOKEN_CAP = 150_000;
-// Sonnet 4.6 admin calls: thinking budget shares this with the text reply.
-const MAX_OUTPUT_TOKENS_ADMIN = 16_000;
-// Haiku 4.5 casual calls: chat replies are short, cap tightly to control cost.
-const MAX_OUTPUT_TOKENS_CASUAL = 1_500;
-// Admin thinking cap — previously "adaptive" (unbounded). 4k is plenty for a
-// tool loop on a day's transcript without racking up output tokens.
-const ADMIN_THINKING_BUDGET = 4_000;
+// Haiku caps the same whether used for casual chat or an admin tool loop.
+// Recap text is ~300-500 output tokens; 4k gives recap headroom without
+// running up costs if the model decides to elaborate.
+const MAX_OUTPUT_TOKENS = 4_000;
 const MAX_TOOL_ITERATIONS = 25;
 
 const SESSIONS_DIR =
@@ -184,14 +186,10 @@ export async function prompt(
 
   const tools: Anthropic.Tool[] = context.isAdmin ? [GROUP_MESSAGES_TOOL] : [];
 
-  // Cost optimization: route admin to Sonnet 4.6 (tool use, deeper reasoning
-  // for recaps) and non-admin casual chat to Haiku 4.5 (~5x cheaper, plenty
-  // of quality for Pazgu's short WhatsApp-style replies).
-  const model = context.isAdmin ? MODELS.sonnet : MODELS.haiku;
-  const maxTokens = context.isAdmin ? MAX_OUTPUT_TOKENS_ADMIN : MAX_OUTPUT_TOKENS_CASUAL;
-  const thinkingConfig = context.isAdmin
-    ? ({ type: "enabled" as const, budget_tokens: ADMIN_THINKING_BUDGET })
-    : undefined;
+  // Everything through this agent runs on Haiku. isAdmin only gates tool
+  // access (get_group_messages), not model selection.
+  const model = MODEL;
+  const maxTokens = MAX_OUTPUT_TOKENS;
 
   let finalText = "";
   let totalIn = 0;
@@ -222,13 +220,11 @@ export async function prompt(
       return m;
     });
 
-    // Admin (Sonnet) gets bounded thinking (4k budget) so tool loops reason
-    // decently without unlimited output cost. Casual (Haiku) omits thinking
-    // entirely — not needed for short chat replies.
+    // No thinking on Haiku — not needed for short chat replies or simple
+    // tool loops, and it eats output tokens.
     const response = await client.messages.create({
       model,
       max_tokens: maxTokens,
-      ...(thinkingConfig ? { thinking: thinkingConfig } : {}),
       system: [
         { type: "text", text: system, cache_control: { type: "ephemeral" } },
       ],
