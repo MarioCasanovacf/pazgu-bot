@@ -13,7 +13,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { runGroupMessages } from "./tools/group-messages.js";
 
 const MODEL = "claude-sonnet-4-6";
-const MAX_TOKENS = 4000;
+// Adaptive thinking shares this budget with the final narration text.
+// 16k matches the conversational agent and leaves plenty of headroom for
+// both a long internal reasoning pass over the full day's transcript and a
+// ~1500-character spoken narration.
+const MAX_TOKENS = 16_000;
 
 const OUTRO = "Este recap viene powered by HAI — Hugo Artificial Intelligence.";
 
@@ -83,9 +87,19 @@ export async function generatePodcastNarration(date: string): Promise<string> {
 
   const textBlock = response.content.find((b) => b.type === "text");
   if (!textBlock || textBlock.type !== "text") {
+    // Log the shape of what we got so next failure is diagnosable.
+    const blockTypes = response.content.map((b) => b.type).join(",");
+    console.error(
+      `[podcast] No text block. stop_reason=${response.stop_reason} blocks=[${blockTypes}] ` +
+      `usage=in:${response.usage.input_tokens} out:${response.usage.output_tokens}`,
+    );
     throw new Error("Claude devolvió una narración vacía.");
   }
 
   const narration = textBlock.text.trim();
+  if (!narration) {
+    console.error(`[podcast] Empty text block. stop_reason=${response.stop_reason}`);
+    throw new Error("Claude devolvió una narración vacía.");
+  }
   return `${narration}\n\n${OUTRO}`;
 }
