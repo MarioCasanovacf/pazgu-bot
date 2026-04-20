@@ -709,7 +709,8 @@ export async function connectWhatsApp(): Promise<WASocket> {
       const testDmJids = (process.env.TEST_DM_JIDS ?? "").split(",").filter(Boolean);
       // Diagnostic: log every incoming JID so we can discover the exact format
       // WhatsApp uses for a given contact. Helps fill ALLOWED_GROUPS/TEST_DM_JIDS.
-      console.log(`[wa][incoming] jid=${jid} group=${isJidGroup(jid)} pushName=${msg.pushName ?? "(none)"}`);
+      const diagText = extractText(msg.message)?.slice(0, 80) ?? "(no text)";
+      console.log(`[wa][incoming] jid=${jid} group=${isJidGroup(jid)} pushName=${msg.pushName ?? "(none)"} text="${diagText}"`);
       if (!isJidGroup(jid) && !testDmJids.includes(jid)) continue;
 
       // Reactions arrive as regular messages with a reactionMessage payload.
