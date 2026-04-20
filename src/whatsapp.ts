@@ -48,7 +48,18 @@ const GROUP_NAMES: Record<string, string> = Object.fromEntries(
   })
 );
 
-const CONTEXT_MESSAGES = 100;
+const CONTEXT_MESSAGES = 40;
+
+// Keywords that suggest the user's query needs group-chat context to make
+// sense. When none match, we skip context injection entirely to save tokens.
+// Covers: temporal references ("ayer", "hoy", "hace rato"), speech acts
+// ("dijo", "comentó", "mencionó"), and meta-references to group activity
+// ("alguien", "platicaron", "discutieron", "opinan").
+const CONTEXT_TRIGGER_REGEX = /\b(ayer|hoy|antes|hace\s+\w+|despu[eé]s|anoche|rato|dijo|dijeron|coment[oó]|mencion[oó]|compart[ií][oó]|opin[oó]|opina(n|ron|ban)?|alguien|preguntaron?|respondi[oó]|hablaron?|platica(ron|mos|ban)?|discuti[oó](eron)?|esto|eso|aquello|le\s+dije|le\s+escrib[ií])\b/i;
+
+function queryNeedsGroupContext(query: string): boolean {
+  return CONTEXT_TRIGGER_REGEX.test(query);
+}
 const IMAGES_DIR = process.env.IMAGES_DIR ?? "/data/images";
 const IMAGE_MAX_SIZE = 512;
 const IMAGE_QUALITY = 60;
@@ -607,13 +618,18 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
   // Send "thinking" indicator
   await sock?.sendPresenceUpdate("composing", jid);
 
-  // Inject recent messages as context for casual queries only.
-  // For admin summary/analysis commands, skip the prefix — the agent has the
-  // get_group_messages tool and will load the day itself. Keeping both caused
-  // the full transcript to travel twice to the model (once in prefix, once in
-  // tool_result) for every recap.
+  // Inject recent messages as context only when the query actually needs it.
+  // Rules:
+  //   - Admin /resumen and friends: the agent has get_group_messages tool; no
+  //     pre-injection needed (avoids transcript traveling twice to the model).
+  //   - Slash commands: never pre-inject.
+  //   - Other casual queries: only inject when the query's wording suggests it
+  //     references group activity ("ayer", "dijo", "alguien", etc.).
+  //     For "pazgu hola" or "pazgu explícame X" the context is wasted tokens.
   const isFullContext = isAdminQuery && isAdmin(userId);
-  const recentChat = isFullContext ? "" : getRecentMessages(jid);
+  const shouldInjectContext =
+    !isFullContext && !isSlashCommand && queryNeedsGroupContext(effectiveQuery);
+  const recentChat = shouldInjectContext ? getRecentMessages(jid) : "";
   const contextPrefix = recentChat
     ? `[CONTEXTO DEL GRUPO — últimos mensajes de la conversación, NO los menciones explícitamente, solo úsalos para entender de qué se habla]\n${recentChat}\n\n[PREGUNTA DEL USUARIO]\n`
     : "";

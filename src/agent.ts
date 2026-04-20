@@ -17,10 +17,17 @@ export const MODELS = {
 
 export type ModelKey = keyof typeof MODELS;
 
+// Default for reporting/logging only. The actual model used is chosen per call.
 export const MODEL: string = MODELS.sonnet;
 
 const CONTEXT_TOKEN_CAP = 150_000;
-const MAX_OUTPUT_TOKENS = 16_000; // Sonnet 4.6 adaptive thinking shares this budget with the response
+// Sonnet 4.6 admin calls: thinking budget shares this with the text reply.
+const MAX_OUTPUT_TOKENS_ADMIN = 16_000;
+// Haiku 4.5 casual calls: chat replies are short, cap tightly to control cost.
+const MAX_OUTPUT_TOKENS_CASUAL = 1_500;
+// Admin thinking cap — previously "adaptive" (unbounded). 4k is plenty for a
+// tool loop on a day's transcript without racking up output tokens.
+const ADMIN_THINKING_BUDGET = 4_000;
 const MAX_TOOL_ITERATIONS = 25;
 
 const SESSIONS_DIR =
@@ -177,6 +184,15 @@ export async function prompt(
 
   const tools: Anthropic.Tool[] = context.isAdmin ? [GROUP_MESSAGES_TOOL] : [];
 
+  // Cost optimization: route admin to Sonnet 4.6 (tool use, deeper reasoning
+  // for recaps) and non-admin casual chat to Haiku 4.5 (~5x cheaper, plenty
+  // of quality for Pazgu's short WhatsApp-style replies).
+  const model = context.isAdmin ? MODELS.sonnet : MODELS.haiku;
+  const maxTokens = context.isAdmin ? MAX_OUTPUT_TOKENS_ADMIN : MAX_OUTPUT_TOKENS_CASUAL;
+  const thinkingConfig = context.isAdmin
+    ? ({ type: "enabled" as const, budget_tokens: ADMIN_THINKING_BUDGET })
+    : undefined;
+
   let finalText = "";
   let totalIn = 0;
   let totalOut = 0;
@@ -206,13 +222,13 @@ export async function prompt(
       return m;
     });
 
-    // Sonnet 4.6 supports adaptive thinking (budget_tokens is deprecated).
-    // Interleaved thinking between tool calls is enabled automatically in this
-    // mode; we already pass assistant blocks back unchanged across iterations.
+    // Admin (Sonnet) gets bounded thinking (4k budget) so tool loops reason
+    // decently without unlimited output cost. Casual (Haiku) omits thinking
+    // entirely — not needed for short chat replies.
     const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      thinking: { type: "adaptive" },
+      model,
+      max_tokens: maxTokens,
+      ...(thinkingConfig ? { thinking: thinkingConfig } : {}),
       system: [
         { type: "text", text: system, cache_control: { type: "ephemeral" } },
       ],
@@ -241,7 +257,7 @@ export async function prompt(
         ts: new Date().toISOString(),
         role: "assistant",
         content: assistantContent,
-        model: MODEL,
+        model,
         usage: { in: totalIn, out: totalOut },
       });
       break;
