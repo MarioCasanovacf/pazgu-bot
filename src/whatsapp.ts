@@ -625,6 +625,15 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
   try {
     const response = (await agentPrompt(jid, fullQuery, { isAdmin: isAdmin(userId) })).trim()
       || "🦥 (sin respuesta)";
+    // Pazguato delay — Pazgu es oso perezoso, no máquina de reflejos. Un
+    // pausa discreta antes del reply para que no se sienta instantáneo.
+    // Scaled a bit por longitud de la respuesta (mensajes largos "tardan
+    // más en escribirse" intuitivamente).
+    const baseDelayMs = 1200;
+    const perCharMs = 6; // ~6ms por caracter de reply
+    const maxExtraMs = 2500;
+    const pazguDelay = baseDelayMs + Math.min(response.length * perCharMs, maxExtraMs);
+    await new Promise((r) => setTimeout(r, pazguDelay));
     await sendReply(jid, response, rawMsg);
     await sock?.sendPresenceUpdate("available", jid);
   } catch (error) {
