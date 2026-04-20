@@ -539,22 +539,37 @@ async function handlePodcastCommand(jid: string, query: string, rawMsg: any): Pr
  * Handle an incoming group message.
  */
 async function handleGroupMessage(jid: string, senderId: string, text: string, rawMsg: any): Promise<void> {
+  console.log(`[wa][debug] handleGroupMessage entered: jid=${jid} sender=${senderId} text="${text.slice(0, 60)}"`);
+
   // Guard: is this group allowed?
-  if (!isGroupAllowed(jid)) return;
+  if (!isGroupAllowed(jid)) {
+    console.log(`[wa][debug] REJECTED by isGroupAllowed for jid=${jid}`);
+    return;
+  }
 
   // Guard: is the bot mentioned?
-  if (!isBotMentioned(text)) return;
+  if (!isBotMentioned(text)) {
+    console.log(`[wa][debug] REJECTED by isBotMentioned for text="${text.slice(0, 60)}"`);
+    return;
+  }
 
   // Guard: is this user allowed? Open groups allow everyone, others check allowlist
   const userId = senderId.split("@")[0];
-  if (!isOpenGroup(jid) && !isAllowed(userId)) return;
+  if (!isOpenGroup(jid) && !isAllowed(userId)) {
+    console.log(`[wa][debug] REJECTED by user/open guard: userId=${userId} openGroup=${isOpenGroup(jid)} userAllowed=${isAllowed(userId)}`);
+    return;
+  }
 
   // Guard: group cooldown (layered with per-user rate limit)
-  if (!checkGroupCooldown(jid)) return;
+  if (!checkGroupCooldown(jid)) {
+    console.log(`[wa][debug] REJECTED by group cooldown for jid=${jid}`);
+    return;
+  }
 
   // Guard: per-user rate limit
   const allowed = trackMessage(userId);
   if (!allowed) {
+    console.log(`[wa][debug] REJECTED by user rate limit: userId=${userId}`);
     await sendReply(jid, "🦥 Demasiados mensajes. Espera un momento.", rawMsg);
     return;
   }
