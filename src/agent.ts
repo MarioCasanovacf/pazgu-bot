@@ -134,7 +134,7 @@ async function getSystemPrompt(): Promise<string> {
   try {
     return await readFile(AGENTS_MD_PATH, "utf-8");
   } catch {
-    return "You are Aiby, a helpful community assistant for AI Builders MX.";
+    return "You are Pazgu, a helpful community assistant.";
   }
 }
 

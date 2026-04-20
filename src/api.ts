@@ -26,7 +26,7 @@ export function startHealthServer(port: number): void {
 
     res.json({
       status: connected ? "ok" : "waiting",
-      bot: "aibuilders-bot",
+      bot: "pazgu-bot",
       connected,
       user: sock?.user?.id ?? null,
       uptime: Math.floor(process.uptime()),

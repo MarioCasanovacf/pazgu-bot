@@ -1,13 +1,13 @@
 /**
- * aibuilders-bot — WhatsApp group bot for AI Builders MX
- * Powered by Baileys + Anthropic SDK 🤖
+ * pazgu-bot — WhatsApp bot for the Cortos y Largos community
+ * Powered by Baileys + Anthropic SDK 🦥
  */
 
 import "dotenv/config";
 import { connectWhatsApp } from "./whatsapp.js";
 import { startHealthServer } from "./api.js";
 
-console.log("🤖 AI Builders Bot starting...");
+console.log("🦥 Pazgu starting...");
 
 // Health check for Railway
 const port = parseInt(process.env.PORT ?? "3000", 10);

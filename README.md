@@ -1,12 +1,13 @@
-# Aiby 👁️ — AI Builders MX Community Bot
+# Pazgu 🦥 — WhatsApp Community Bot
 
-WhatsApp bot for the AI Builders MX community. Powered by [Baileys](https://github.com/WhiskeySockets/Baileys) + [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript).
+WhatsApp bot for a community group. Powered by [Baileys](https://github.com/WhiskeySockets/Baileys) + [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript).
 
 ## What it does
 
-- **Community assistant** — Answers questions about AI, dev tools, LLMs, agents, and building products
+- **Community assistant** — Responds when mentioned with `pazgu`; answers in character (pazguatón de buen corazón)
 - **Group context awareness** — Reads recent group messages to understand ongoing conversations
 - **Daily summaries** — Admins can request recaps of the day's discussions via the `get_group_messages` tool. Senders are rendered as `FirstName (…1234)` using the contact store built from WhatsApp `pushName`
+- **Podcast-audio recaps (`/podcast`)** — Admin-only. Reads all groups' transcripts for a date, writes an audio-optimized narration with Claude, synthesizes it via ElevenLabs TTS, transcodes to OGG/Opus and posts as a WhatsApp voice note. Outro fixed to "powered by HAI — Hugo Artificial Intelligence". Capped at `PODCAST_MAX_PER_DAY` per group with a cooldown
 - **Message logging** — Stores all group messages in daily `.jsonl` files for analysis
 - **Contact store** — Persists phone → first name mapping at `CONTACTS_FILE` so recaps attribute messages by name
 - **Link enrichment** — Uses Firecrawl + Haiku to summarize shared links in context
@@ -39,7 +40,7 @@ WhatsApp ← Baileys → Message Handler → Anthropic Messages API → Response
 | Variable | Description |
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | **Required.** Anthropic API key (billed to your API account) |
-| `BOT_PREFIX` | Trigger word (default: `aiby`) |
+| `BOT_PREFIX` | Trigger word (default: `pazgu`) |
 | `ALLOWED_GROUPS` | Comma-separated group JIDs |
 | `ALLOWED_USERS` | Comma-separated user IDs (empty = all) |
 | `ADMIN_USERS` | Comma-separated admin IDs (for summaries) |
@@ -52,6 +53,12 @@ WhatsApp ← Baileys → Message Handler → Anthropic Messages API → Response
 | `API_KEY` | API key for messages endpoint |
 | `BAILEYS_AUTH_B64` | Base64 Baileys auth (for first deploy) |
 | `FIRECRAWL_API_KEY` | Firecrawl API key (link enrichment) |
+| `ELEVENLABS_API_KEY` | ElevenLabs API key (for `/podcast` audio recaps) |
+| `ELEVENLABS_VOICE_ID` | Voice ID for podcast narration (e.g. Cristina Campos) |
+| `ELEVENLABS_MODEL` | ElevenLabs model (default: `eleven_multilingual_v2`) |
+| `PODCAST_MAX_PER_DAY` | Max `/podcast` runs per group per day (default: `2`) |
+| `PODCAST_COOLDOWN_MS` | Cooldown between podcasts per group (default: 30 min) |
+| `PODCAST_USAGE_FILE` | Podcast usage JSON path (default: `/data/podcast-usage.json`) |
 | `PORT` | HTTP server port (default: `3000`) |
 | `RATE_LIMIT_MAX` | Max messages per window (default: `10`) |
 | `RATE_LIMIT_WINDOW_MS` | Rate limit window in ms (default: `3600000`) |
@@ -96,4 +103,4 @@ To find group JIDs, check bot logs when it connects — it prints all group memb
 
 ## License
 
-Private — AI Builders MX
+Private — Cortos y Largos community

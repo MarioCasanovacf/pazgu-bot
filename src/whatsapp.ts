@@ -25,11 +25,14 @@ import { isAllowed, isAdmin, isOpenGroup, isGroupAllowed, trackMessage, checkGro
 import { prompt as agentPrompt, resetSession } from "./agent.js";
 import { upsertContact, getContactLabel } from "./contacts.js";
 import { cdmxDateString, cdmxDateStringOffset } from "./time.js";
+import { generatePodcastNarration } from "./podcast.js";
+import { textToVoiceNoteBuffer, isTTSConfigured } from "./audio.js";
+import { canRunPodcast, recordPodcastRun } from "./podcast-usage.js";
 
 const logger = pino({ level: "silent" }); // Baileys is VERY noisy
 
 const AUTH_DIR = process.env.BAILEYS_AUTH_DIR ?? "/data/baileys-auth";
-const BOT_PREFIX = process.env.BOT_PREFIX ?? "aiby";
+const BOT_PREFIX = process.env.BOT_PREFIX ?? "pazgu";
 
 // WhatsApp message length limit
 const MAX_WA_MESSAGE = 4096;
@@ -408,7 +411,7 @@ function extractText(message: any): string | null {
 function isBotMentioned(text: string): boolean {
   const lower = text.toLowerCase();
   const prefix = BOT_PREFIX.toLowerCase();
-  // Match "aiby" as a standalone word anywhere in the message
+  // Match the bot prefix as a standalone word anywhere in the message
   const regex = new RegExp(`(?:^|\\s|@)${prefix}(?:\\s|$|[,.:!?])`, "i");
   return regex.test(lower) || lower.startsWith(prefix) || lower.endsWith(prefix);
 }
@@ -454,6 +457,85 @@ async function sendReply(jid: string, text: string, quotedMsg?: any): Promise<vo
 }
 
 /**
+ * Parse the date argument to /podcast. Defaults to yesterday (CDMX).
+ * Accepts: "hoy"/"today", "ayer"/"yesterday", or YYYY-MM-DD.
+ * Returns null if the argument is present but invalid.
+ */
+function parsePodcastDate(query: string): string | null {
+  const parts = query.trim().split(/\s+/);
+  if (parts.length <= 1) return cdmxDateStringOffset(-1);
+  const arg = parts[1].toLowerCase();
+  if (arg === "hoy" || arg === "today") return cdmxDateString();
+  if (arg === "ayer" || arg === "yesterday") return cdmxDateStringOffset(-1);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(arg)) return arg;
+  return null;
+}
+
+/**
+ * Handle /podcast — generate a cross-group daily narration, synthesize it via
+ * ElevenLabs, transcode to OGG/Opus, and send as a WhatsApp voice note to the
+ * group where the command was invoked (expected: General).
+ *
+ * Admin-only (already gated upstream). Applies per-group daily cap and cooldown.
+ * On failure, falls back to sending the narration as text so the recap still
+ * reaches the group — and does NOT count the attempt against the daily cap.
+ */
+async function handlePodcastCommand(jid: string, query: string, rawMsg: any): Promise<void> {
+  if (!sock) return;
+
+  const date = parsePodcastDate(query);
+  if (!date) {
+    await sendReply(jid, "🦥 Fecha inválida. Usa /podcast, /podcast ayer, /podcast hoy, o /podcast YYYY-MM-DD.", rawMsg);
+    return;
+  }
+
+  const check = canRunPodcast(jid);
+  if (!check.ok) {
+    await sendReply(jid, check.reason, rawMsg);
+    return;
+  }
+
+  if (!isTTSConfigured()) {
+    await sendReply(jid, "🦥 No está configurado el TTS. Falta ELEVENLABS_API_KEY o ELEVENLABS_VOICE_ID.", rawMsg);
+    return;
+  }
+
+  await sendReply(jid, "🦥 Ya casi, tardo unos 30 segundos…", rawMsg);
+  await sock.sendPresenceUpdate("recording", jid);
+
+  let narration: string;
+  try {
+    console.log(`[podcast] Generating narration for ${date}`);
+    narration = await generatePodcastNarration(date);
+    console.log(`[podcast] Narration length: ${narration.length} chars`);
+  } catch (err) {
+    console.error("[podcast] Narration failed:", err);
+    await sock.sendPresenceUpdate("available", jid);
+    await sendReply(jid, `🦥 No pude armar el podcast: ${(err as Error).message}`, rawMsg);
+    return;
+  }
+
+  try {
+    const ogg = await textToVoiceNoteBuffer(narration);
+    console.log(`[podcast] OGG size: ${Math.round(ogg.length / 1024)}KB`);
+
+    await sock.sendMessage(jid, {
+      audio: ogg,
+      ptt: true,
+      mimetype: "audio/ogg; codecs=opus",
+    });
+    await sock.sendPresenceUpdate("available", jid);
+    recordPodcastRun(jid);
+  } catch (err) {
+    // TTS/transcode failed — fall back to text so the recap still lands.
+    // Don't count against the cap (charitable).
+    console.error("[podcast] TTS/transcode failed, falling back to text:", err);
+    await sock.sendPresenceUpdate("available", jid);
+    await sendReply(jid, `🦥 Falló el audio, te va en texto:\n\n${narration}`, rawMsg);
+  }
+}
+
+/**
  * Handle an incoming group message.
  */
 async function handleGroupMessage(jid: string, senderId: string, text: string, rawMsg: any): Promise<void> {
@@ -473,13 +555,13 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
   // Guard: per-user rate limit
   const allowed = trackMessage(userId);
   if (!allowed) {
-    await sendReply(jid, "👁️ Demasiados mensajes. Espera un momento.", rawMsg);
+    await sendReply(jid, "🦥 Demasiados mensajes. Espera un momento.", rawMsg);
     return;
   }
 
   const query = stripMention(text);
   if (!query) {
-    await sendReply(jid, "👁️ ¿En qué te ayudo? Escribe tu pregunta después de mencionarme.", rawMsg);
+    await sendReply(jid, "🦥 ¿En qué te ayudo? Escribe tu pregunta después de mencionarme.", rawMsg);
     return;
   }
 
@@ -493,7 +575,13 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
   const resetCommands = ["/reset", "/limpiar", "/olvida", "/clear"];
   if (resetCommands.some((cmd) => query.toLowerCase().startsWith(cmd))) {
     await resetSession(jid);
-    await sendReply(jid, "👁️ Sesión limpia.", rawMsg);
+    await sendReply(jid, "🦥 Sesión limpia.", rawMsg);
+    return;
+  }
+
+  // /podcast — admin-only mega-recap delivered as a WhatsApp voice note.
+  if (query.toLowerCase().startsWith("/podcast")) {
+    await handlePodcastCommand(jid, query, rawMsg);
     return;
   }
 
@@ -536,12 +624,12 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
 
   try {
     const response = (await agentPrompt(jid, fullQuery, { isAdmin: isAdmin(userId) })).trim()
-      || "👁️ (sin respuesta)";
+      || "🦥 (sin respuesta)";
     await sendReply(jid, response, rawMsg);
     await sock?.sendPresenceUpdate("available", jid);
   } catch (error) {
     console.error(`[wa] Error handling message:`, error);
-    await sendReply(jid, "👁️ Algo falló. Intenta de nuevo.", rawMsg);
+    await sendReply(jid, "🦥 Algo falló. Intenta de nuevo.", rawMsg);
     await sock?.sendPresenceUpdate("available", jid);
   }
 }
@@ -705,7 +793,7 @@ export async function connectWhatsApp(): Promise<WASocket> {
         const dmResetCmds = ["/reset", "/limpiar", "/olvida", "/clear"];
         if (dmResetCmds.some((cmd) => text.toLowerCase().trim().startsWith(cmd))) {
           await resetSession(jid);
-          await sendReply(jid, "👁️ Sesión limpia.", msg);
+          await sendReply(jid, "🦥 Sesión limpia.", msg);
           continue;
         }
 
@@ -714,11 +802,11 @@ export async function connectWhatsApp(): Promise<WASocket> {
           const dmQuery = `[REMITENTE: ${getContactLabel(jid)}]\n${text}`;
           const userNum = jid.split("@")[0];
           const response = (await agentPrompt(jid, dmQuery, { isAdmin: isAdmin(userNum) })).trim()
-            || "👁️ (sin respuesta)";
+            || "🦥 (sin respuesta)";
           await sendReply(jid, response, msg);
         } catch (err) {
           console.error("[wa] DM error:", err);
-          await sendReply(jid, "👁️ Algo falló.", msg);
+          await sendReply(jid, "🦥 Algo falló.", msg);
         }
       }
     }
