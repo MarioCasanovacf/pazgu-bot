@@ -22,7 +22,7 @@ import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import sharp from "sharp";
 import Anthropic from "@anthropic-ai/sdk";
 import { isAllowed, isAdmin, isOpenGroup, isGroupAllowed, trackMessage, checkGroupCooldown } from "./guards.js";
-import { prompt as agentPrompt, resetSession } from "./agent.js";
+import { prompt as agentPrompt, resetSession, resetAllSessions } from "./agent.js";
 import { upsertContact, getContactLabel } from "./contacts.js";
 import { cdmxDateString, cdmxDateStringOffset } from "./time.js";
 import { generatePodcastNarration } from "./podcast.js";
@@ -814,6 +814,20 @@ export async function connectWhatsApp(): Promise<WASocket> {
       } else if (testDmJids.includes(jid)) {
         // DM test mode — skip guards, respond directly
         console.log(`[wa] DM from ${jid}`);
+
+        // /reset-all — admin-only nuke of every live session file across all
+        // JIDs. Useful when AGENTS.md is updated in a way that should
+        // override style patterns Pazgu picked up from past turns.
+        const dmUserNum = jid.split("@")[0];
+        if (text.toLowerCase().trim().startsWith("/reset-all")) {
+          if (!isAdmin(dmUserNum)) {
+            await sendReply(jid, "🦥 Solo admin.", msg);
+            continue;
+          }
+          const count = await resetAllSessions();
+          await sendReply(jid, `🦥 Archivé ${count} sesiones. Todas empezarán limpias.`, msg);
+          continue;
+        }
 
         const dmResetCmds = ["/reset", "/limpiar", "/olvida", "/clear"];
         if (dmResetCmds.some((cmd) => text.toLowerCase().trim().startsWith(cmd))) {

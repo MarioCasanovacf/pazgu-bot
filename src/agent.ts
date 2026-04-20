@@ -302,6 +302,33 @@ export async function resetSession(jid: string): Promise<void> {
   await rename(file, join(SESSIONS_DIR, `${sanitizeJid(jid)}.${ts}.jsonl`));
 }
 
+/**
+ * Archive every live session file across all JIDs. Returns how many sessions
+ * were archived. Useful when the operator updates AGENTS.md in a way that
+ * should override any style patterns Pazgu learned from past turns.
+ */
+export async function resetAllSessions(): Promise<number> {
+  if (!existsSync(SESSIONS_DIR)) return 0;
+  const files = await readdir(SESSIONS_DIR);
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  // Live session files are exactly "<sanitizedJid>.jsonl" — archived ones
+  // carry an additional timestamp segment, so match the strict shape.
+  const liveFiles = files.filter((f) => /^[a-zA-Z0-9_-]+\.jsonl$/.test(f));
+  let archived = 0;
+  for (const f of liveFiles) {
+    const base = f.slice(0, -".jsonl".length);
+    const from = join(SESSIONS_DIR, f);
+    const to = join(SESSIONS_DIR, `${base}.${ts}.jsonl`);
+    try {
+      await rename(from, to);
+      archived++;
+    } catch {
+      // skip files that race or disappear mid-loop
+    }
+  }
+  return archived;
+}
+
 export interface SessionStats {
   messages: number;
   tokensApprox: number;
