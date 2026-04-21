@@ -10,6 +10,10 @@ import { spawn } from "child_process";
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY ?? "";
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "";
 const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL ?? "eleven_multilingual_v2";
+// ElevenLabs voice_settings.speed officially supports 0.7–1.2 on most models.
+// Cristina Campos sounded too slow at the default (1.0) for WhatsApp voice
+// notes, so default to 1.2 (max safe). Tune via env var if you want faster.
+const ELEVENLABS_VOICE_SPEED = parseFloat(process.env.ELEVENLABS_VOICE_SPEED ?? "1.2");
 
 export function isTTSConfigured(): boolean {
   return !!(ELEVENLABS_API_KEY && ELEVENLABS_VOICE_ID);
@@ -39,6 +43,7 @@ export async function synthesize(text: string): Promise<Buffer> {
           similarity_boost: 0.75,
           style: 0.35,
           use_speaker_boost: true,
+          speed: ELEVENLABS_VOICE_SPEED,
         },
       }),
     },
