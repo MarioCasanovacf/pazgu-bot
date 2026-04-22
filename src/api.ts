@@ -66,6 +66,21 @@ export function startHealthServer(port: number): void {
     }
   });
 
+  // Send a proactive WhatsApp message as Pazgu to any JID. Operator-only
+  // (gated by API_KEY). Body: { jid: string, text: string }.
+  app.post("/send", express.json(), authMiddleware, async (req, res) => {
+    const { jid, text } = req.body ?? {};
+    if (!jid || !text) return res.status(400).json({ error: "Missing jid or text" });
+    const sock = getSocket();
+    if (!sock) return res.status(503).json({ error: "WhatsApp socket not connected" });
+    try {
+      const result = await sock.sendMessage(jid, { text });
+      res.json({ ok: true, id: result?.key?.id ?? null });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   app.listen(port, () => {
     console.log(`[api] Health check on :${port}/health`);
   });
