@@ -50,6 +50,22 @@ export function startHealthServer(port: number): void {
     res.json({ file: name, count: lines.length, messages: lines });
   });
 
+  // Resolve a phone number to a WhatsApp JID via Baileys. Useful to whitelist
+  // personal contacts who aren't in any group (so their JID never appears in
+  // logs naturally). Phone must be international format, with or without `+`.
+  app.get("/resolve-jid", authMiddleware, async (req, res) => {
+    const phone = (req.query.phone as string ?? "").replace(/\D/g, "");
+    if (!phone) return res.status(400).json({ error: "Missing phone query param" });
+    const sock = getSocket();
+    if (!sock) return res.status(503).json({ error: "WhatsApp socket not connected" });
+    try {
+      const result = await sock.onWhatsApp(phone);
+      res.json({ phone, result });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   app.listen(port, () => {
     console.log(`[api] Health check on :${port}/health`);
   });
