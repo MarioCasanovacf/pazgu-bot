@@ -5,3 +5,4 @@ dist/
 baileys-auth/
 sessions/
 agent/auth.json
+*.b64
