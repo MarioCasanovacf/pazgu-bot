@@ -732,7 +732,10 @@ export async function connectWhatsApp(): Promise<WASocket> {
 
       // Allow DMs for testing (configure via TEST_DM_JIDS env var)
       const testDmJids = (process.env.TEST_DM_JIDS ?? "").split(",").filter(Boolean);
-      if (!isJidGroup(jid) && !testDmJids.includes(jid)) continue;
+      if (!isJidGroup(jid) && !testDmJids.includes(jid)) {
+        console.log(`[wa] Dropped DM from ${jid} (not in TEST_DM_JIDS). pushName=${msg.pushName ?? "?"}`);
+        continue;
+      }
 
       // Reactions arrive as regular messages with a reactionMessage payload.
       // Capture and log before anything else — they have no text/image.
