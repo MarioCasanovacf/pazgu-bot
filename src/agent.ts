@@ -184,7 +184,13 @@ export async function prompt(
     content: userContent,
   });
 
-  const tools: Anthropic.Tool[] = context.isAdmin ? [GROUP_MESSAGES_TOOL] : [];
+  // Base toolkit: web search is available to everyone. It's a server tool
+  // (Anthropic executes it, results come back automatically — no local
+  // dispatch needed). Capped at 3 searches per turn so Pazgu doesn't spiral.
+  const tools: Anthropic.Tool[] = [
+    { type: "web_search_20250305", name: "web_search", max_uses: 3 } as any,
+  ];
+  if (context.isAdmin) tools.push(GROUP_MESSAGES_TOOL);
 
   // Everything through this agent runs on Haiku. isAdmin only gates tool
   // access (get_group_messages), not model selection.
