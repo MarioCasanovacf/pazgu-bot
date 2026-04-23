@@ -28,6 +28,7 @@ import { cdmxDateString, cdmxDateStringOffset } from "./time.js";
 import { generatePodcastNarration } from "./podcast.js";
 import { textToVoiceNoteBuffer, isTTSConfigured } from "./audio.js";
 import { canRunPodcast, recordPodcastRun } from "./podcast-usage.js";
+import { isAsleep, setAsleep } from "./sleep.js";
 
 const logger = pino({ level: "silent" }); // Baileys is VERY noisy
 
@@ -560,6 +561,20 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
   const userId = senderId.split("@")[0];
   if (!isOpenGroup(jid) && !isAllowed(userId)) return;
 
+  // Guard: Pazgu is asleep. Only an admin /despertar wakes him. Everything
+  // else is silently dropped — same behavior whether it's a casual ping or
+  // a slash command. This check sits above rate limits so wake-ups are
+  // never blocked by cooldowns.
+  if (isAsleep()) {
+    const stripped = stripMention(text).toLowerCase().trim();
+    const wakeCmds = ["/despertar", "/wake"];
+    if (wakeCmds.some((cmd) => stripped.startsWith(cmd)) && isAdmin(userId)) {
+      setAsleep(false);
+      await sendReply(jid, "🦥 ya desperté, aquí ando", rawMsg);
+    }
+    return;
+  }
+
   // Guard: group cooldown (layered with per-user rate limit)
   if (!checkGroupCooldown(jid)) return;
 
@@ -587,6 +602,24 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
   if (resetCommands.some((cmd) => query.toLowerCase().startsWith(cmd))) {
     await resetSession(jid);
     await sendReply(jid, "🦥 Sesión limpia.", rawMsg);
+    return;
+  }
+
+  // /dormir — silence Pazgu globally until /despertar. Admin-only (already
+  // gated above for slash commands). Persisted, survives restarts.
+  const sleepCmds = ["/dormir", "/sleep"];
+  if (sleepCmds.some((cmd) => query.toLowerCase().startsWith(cmd))) {
+    setAsleep(true);
+    await sendReply(jid, "💤 me duermo. solo /despertar me revive", rawMsg);
+    return;
+  }
+
+  // /despertar when already awake — confirm idempotently so the admin gets
+  // feedback either way.
+  const wakeCmds = ["/despertar", "/wake"];
+  if (wakeCmds.some((cmd) => query.toLowerCase().startsWith(cmd))) {
+    setAsleep(false);
+    await sendReply(jid, "🦥 ya estoy despierto", rawMsg);
     return;
   }
 
@@ -818,11 +851,42 @@ export async function connectWhatsApp(): Promise<WASocket> {
         // DM test mode — skip guards, respond directly
         console.log(`[wa] DM from ${jid}`);
 
+        const dmUserNum = jid.split("@")[0];
+        const dmText = text.toLowerCase().trim();
+
+        // Sleep gate: if Pazgu is asleep, only admin /despertar wakes him.
+        // Everything else — casual DM, slash commands, reset-all — silently
+        // dropped until revived.
+        if (isAsleep()) {
+          const dmWakeCmds = ["/despertar", "/wake"];
+          if (dmWakeCmds.some((cmd) => dmText.startsWith(cmd)) && isAdmin(dmUserNum)) {
+            setAsleep(false);
+            await sendReply(jid, "🦥 ya desperté, aquí ando", msg);
+          }
+          continue;
+        }
+
+        // /dormir from an admin DM — silence Pazgu globally. From a non-admin
+        // it's a normal message that falls through to the agent.
+        const dmSleepCmds = ["/dormir", "/sleep"];
+        if (dmSleepCmds.some((cmd) => dmText.startsWith(cmd)) && isAdmin(dmUserNum)) {
+          setAsleep(true);
+          await sendReply(jid, "💤 me duermo. solo /despertar me revive", msg);
+          continue;
+        }
+
+        // /despertar when already awake — admin-only idempotent confirm.
+        const dmWakeCmds = ["/despertar", "/wake"];
+        if (dmWakeCmds.some((cmd) => dmText.startsWith(cmd)) && isAdmin(dmUserNum)) {
+          setAsleep(false);
+          await sendReply(jid, "🦥 ya estoy despierto", msg);
+          continue;
+        }
+
         // /reset-all — admin-only nuke of every live session file across all
         // JIDs. Useful when AGENTS.md is updated in a way that should
         // override style patterns Pazgu picked up from past turns.
-        const dmUserNum = jid.split("@")[0];
-        if (text.toLowerCase().trim().startsWith("/reset-all")) {
+        if (dmText.startsWith("/reset-all")) {
           if (!isAdmin(dmUserNum)) {
             await sendReply(jid, "🦥 Solo admin.", msg);
             continue;
@@ -833,7 +897,7 @@ export async function connectWhatsApp(): Promise<WASocket> {
         }
 
         const dmResetCmds = ["/reset", "/limpiar", "/olvida", "/clear"];
-        if (dmResetCmds.some((cmd) => text.toLowerCase().trim().startsWith(cmd))) {
+        if (dmResetCmds.some((cmd) => dmText.startsWith(cmd))) {
           await resetSession(jid);
           await sendReply(jid, "🦥 Sesión limpia.", msg);
           continue;
