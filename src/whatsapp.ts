@@ -636,14 +636,29 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
   // If an admin fires a bare summary command inside a known group
   // (e.g. "/resumen" with no target), auto-complete with the current group
   // alias so the agent knows which transcript to load.
+  //
+  // Also detect explicit global recap requests ("/resumen all|global|todos")
+  // so we can tag them with a firm directive downstream — otherwise Haiku
+  // sometimes ignores "all" and defaults to the current group via the
+  // [GRUPO ACTUAL] hint.
+  const globalRecapRe = /^\/(resumen|summary|stats|reporte|report|an[aá]lisis)\s+(all|global|todos|todas)(\s+.*)?$/i;
+  const globalMatch = globalRecapRe.exec(query.trim());
+  const isGlobalRecap = !!globalMatch && isAdminQuery && isAdmin(userId);
+
   let effectiveQuery = query;
   if (isAdminQuery && isAdmin(userId)) {
-    const bareCmdRe = /^\/(resumen|summary|stats|reporte|report|an[aá]lisis)\s*$/i;
-    if (bareCmdRe.test(query.trim())) {
-      const currentAlias = GROUP_NAMES[jid];
-      if (currentAlias) {
-        effectiveQuery = `${query.trim()} ${currentAlias}`;
-        console.log(`[wa] Expanded bare summary to: ${effectiveQuery}`);
+    if (isGlobalRecap) {
+      const trailing = globalMatch![3]?.trim() ?? "";
+      effectiveQuery = `/resumen all${trailing ? " " + trailing : ""}`;
+      console.log(`[wa] Global recap requested: ${effectiveQuery}`);
+    } else {
+      const bareCmdRe = /^\/(resumen|summary|stats|reporte|report|an[aá]lisis)\s*$/i;
+      if (bareCmdRe.test(query.trim())) {
+        const currentAlias = GROUP_NAMES[jid];
+        if (currentAlias) {
+          effectiveQuery = `${query.trim()} ${currentAlias}`;
+          console.log(`[wa] Expanded bare summary to: ${effectiveQuery}`);
+        }
       }
     }
   }
@@ -668,8 +683,15 @@ async function handleGroupMessage(jid: string, senderId: string, text: string, r
     : "";
   const senderLabel = getContactLabel(senderId);
   const currentGroupAlias = GROUP_NAMES[jid];
-  const groupHint = currentGroupAlias ? `\n[GRUPO ACTUAL: ${currentGroupAlias}]` : "";
-  const fullQuery = `[REMITENTE: ${senderLabel}]${groupHint}\n${contextPrefix}${effectiveQuery}`;
+  // Skip the current-group hint on global recap requests — the hint biases
+  // Haiku toward calling the tool with the current group alias instead of
+  // with group="all".
+  const groupHint =
+    currentGroupAlias && !isGlobalRecap ? `\n[GRUPO ACTUAL: ${currentGroupAlias}]` : "";
+  const globalDirective = isGlobalRecap
+    ? `\n[INSTRUCCIÓN: RECAP GLOBAL. Llama get_group_messages UNA SOLA VEZ con group="all" (literal). NO uses un alias individual. Sintetiza el recap cruzado de todos los grupos a partir de ese único resultado.]`
+    : "";
+  const fullQuery = `[REMITENTE: ${senderLabel}]${groupHint}${globalDirective}\n${contextPrefix}${effectiveQuery}`;
 
   try {
     const response = (await agentPrompt(jid, fullQuery, { isAdmin: isAdmin(userId) })).trim()
